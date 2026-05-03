@@ -1,0 +1,8 @@
+# codex_proxy 依赖
+# 安装: pip install -r requirements.txt
+#
+# Python >= 3.9
+
+flask>=2.0        # Web 框架，处理 HTTP 请求路由和 CORS
+requests>=2.28    # HTTP 客户端，转发请求到 DeepSeek API
+waitress>=2.0     # 生产级 WSGI 服务器，支持 SSE 流式响应
