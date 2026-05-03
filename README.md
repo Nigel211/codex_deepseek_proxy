@@ -1,11 +1,14 @@
 # codex_proxy
 
-OpenAI Responses API ↔ DeepSeek Chat API 流式转发代理。让 Codex IDE / Codex CLI 通过 cc-switch 接入 DeepSeek 模型。
+OpenAI Responses API ↔ DeepSeek Chat API 流式转发代理。让 Codex IDE / Codex CLI 通过 cc-switch 接入 DeepSeek 模型，支持完整的工具调用（Function Calling）。
 
 ## 功能
 
 - 将 Codex 发出的 OpenAI Responses API 请求翻译为 DeepSeek Chat Completions API
-- 将 DeepSeek 的 SSE 流式响应翻译回 Responses API 语义事件
+- **完整支持 Function Calling**：工具定义透传、并行工具调用合并、tool 消息排序
+- 将 DeepSeek 的 SSE 流式响应翻译回 Responses API 语义事件（含 function_call 事件）
+- 自动修复消息顺序：Codex 注入的系统消息（如审批通知）会被重排，确保 tool 消息紧跟 assistant 消息
+- 禁用思考模式：避免 DeepSeek v4-pro 的 `reasoning_content` 回传兼容问题
 - 支持 cc-switch 模型选择（请求中的 model 字段优先）
 - API Key 优先级：系统环境变量 > `.env` 文件 > 首次交互输入
 
@@ -81,14 +84,35 @@ Responses API ────→  路由转发  ────→  格式转换 (Resp
 SSE Stream    ←────   透传     ←────  格式转换 (Chat→Responses)   ←────  SSE Stream
 ```
 
-本代理完整实现了 OpenAI Responses API 的 SSE 语义事件流：
+本代理完整实现了 OpenAI Responses API 的 SSE 语义事件流，支持文本和函数调用两种输出：
 
+**纯文本响应：**
 ```
 response.created → response.in_progress → response.output_item.added
 → response.content_part.added → response.output_text.delta (×N)
 → response.output_text.done → response.content_part.done
 → response.output_item.done → response.completed
 ```
+
+**函数调用响应：**
+```
+response.created → response.in_progress
+→ response.output_item.added (type: function_call)
+→ response.function_call_arguments.delta (×N)
+→ response.function_call_arguments.done
+→ response.output_item.done → response.completed
+```
+
+## 工具调用兼容性
+
+代理处理了 DeepSeek Chat Completions API 与 OpenAI Responses API 之间的以下差异：
+
+| 问题 | 处理方式 |
+|------|----------|
+| 工具定义格式不同 | 将 Responses API 扁平格式转为 Chat API 嵌套 `function` 格式，清除 `strict` 和 `additionalProperties` 字段 |
+| 并行工具调用 | 将 Codex 的多个连续 `function_call` 项合并为单个 assistant 消息（含多个 `tool_calls`） |
+| 消息顺序 | DeepSeek 要求 tool 消息紧跟对应的 assistant 消息；代理自动将 Codex 插入的 system 消息移到 assistant 之前 |
+| 思考模式 | 默认禁用（`thinking: {type: "disabled"}`），避免 `reasoning_content` 无法通过 Responses API 回传 |
 
 ## 常见问题
 
@@ -99,6 +123,10 @@ response.created → response.in_progress → response.output_item.added
 **Q: 如何更换模型？**
 
 在 cc-switch 中更改模型名，代理会自动透传。或设置 `DEEPSEEK_MODEL=deepseek-chat` 作为默认。
+
+**Q: 工具调用报 400 错误？**
+
+检查 `proxy_debug.log` 中的错误详情。常见原因：DeepSeek 账户余额不足、模型不支持工具调用、或请求体过大。
 
 **Q: 是否需要安装 Python？**
 
